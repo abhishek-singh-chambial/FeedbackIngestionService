@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 20
+
+Resources:
+  TwitterEventSearch:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: s3://feedback-pull-code-s3-bucket/FeedbackPullApplication.zip
+      Handler: com.feedback.handler.TwitterSearchHandler::handleRequest
+      Runtime: java8
+      MemorySize: 512
+      Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
+        Variables:
+          TWITTER_API_KEY: UPDATE_AT_PORTAL
+          TWITTER_API_SECRET: UPDATE_AT_PORTAL
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt SearchEventsDLQ.Arn
+
+  TripAdvisorEventSearch:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: s3://feedback-pull-code-s3-bucket/FeedbackPullApplication.zip
+      Handler: com.feedback.handler.TripAdvisorSearchHandler::handleRequest
+      Runtime: java8
+      MemorySize: 512
+      Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
+        Variables:
+          REVIEW_API_KEY: UPDATE_AT_PORTAL
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt SearchEventsDLQ.Arn
+
+  FeedbackEventParser:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: s3://feedback-pull-code-s3-bucket/FeedbackPullApplication.zip
+      Handler: com.feedback.handler.FeedbackEventParserHandler::handleRequest
+      Runtime: java8
+      MemorySize: 512
+      Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
+        Variables:
+          KEY: VALUE
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt EventParserQueue.Arn
+            BatchSize: 1
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt EventParserDLQ.Arn
+
+  SaveFeedback:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: s3://feedback-pull-code-s3-bucket/FeedbackPullApplication.zip
+      Handler: com.feedback.handler.SaveFeedbackHandler::handleRequest
+      Runtime: java8
+      MemorySize: 512
+      Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
+        Variables:
+          KEY: VALUE
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt DynamoDBWriteQueue.Arn
+            BatchSize: 1
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt DynamoDBWriteDLQ.Arn
+
+  EventParserQueue:
+    Type: AWS::SQS::Queue
+    Description: "Queue triggering Event parsing lambda"
+    Properties:
+      QueueName: "EventParserQueue"
+      MessageRetentionPeriod: 604800 # 7 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt EventParserDLQ.Arn
+        maxReceiveCount: 1
+      VisibilityTimeout: 300
+
+  EventParserDLQ:
+    Type: AWS::SQS::Queue
+    Description: "Dead letter queue triggering Event parsing lambda"
+    Properties:
+      QueueName: "EventParserDLQ"
+      MessageRetentionPeriod: 1209600 # 14 days (SQS max)
+      VisibilityTimeout: 30
+
+  SearchEventsDLQ:
+    Type: AWS::SQS::Queue
+    Description: "Dead letter queue for all event producers"
+    Properties:
+      QueueName: "SearchEventsDLQ"
+      MessageRetentionPeriod: 1209600 # 14 days (SQS max)
+      VisibilityTimeout: 30
+
+  DynamoDBWriteQueue:
+    Type: AWS::SQS::Queue
+    Description: "Queue triggering Save Feedback lambda"
+    Properties:
+      QueueName: "DynamoDBWriteQueue"
+      MessageRetentionPeriod: 604800 # 7 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DynamoDBWriteDLQ.Arn
+        maxReceiveCount: 1
+      VisibilityTimeout: 300
+
+  DynamoDBWriteDLQ:
+    Type: AWS::SQS::Queue
+    Description: "Dead letter queue for SaveFeedback lambda and queue"
+    Properties:
+      QueueName: "DynamoDBWriteDLQ"
+      MessageRetentionPeriod: 1209600 # 14 days (SQS max)
+      VisibilityTimeout: 30
+
+  FeedbackTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "generator"
+          AttributeType: "S"
+        - AttributeName: "id"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "generator"
+          KeyType: "HASH"
+        - AttributeName: "id"
+          KeyType: "RANGE"
+      BillingMode: PAY_PER_REQUEST
+      TableName: "Feedback-Table"
