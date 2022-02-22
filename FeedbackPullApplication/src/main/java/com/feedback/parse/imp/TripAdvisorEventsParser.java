@@ -1,4 +1,4 @@
-package com.feedback.utils.parse.imp;
+package com.feedback.parse.imp;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -9,7 +9,7 @@ import com.feedback.model.Metadata;
 import com.feedback.model.RawFeedbackEvent;
 import com.feedback.model.tripadvisor.EventData;
 import com.feedback.model.tripadvisor.Review;
-import com.feedback.utils.parse.Parser;
+import com.feedback.parse.Parser;
 
 import java.util.List;
 import java.util.stream.Collectors;

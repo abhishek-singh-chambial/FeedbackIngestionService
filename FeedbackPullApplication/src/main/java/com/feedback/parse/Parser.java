@@ -1,4 +1,4 @@
-package com.feedback.utils.parse;
+package com.feedback.parse;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.feedback.model.FeedbackEvent;

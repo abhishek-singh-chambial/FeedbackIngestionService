@@ -3,6 +3,11 @@
 ## Current Design
 ![Design](image/FeedbackIngestionPipelineDesign.png?raw=true "Feedback Ingestion Pipeline Design")
 
+##Assumptions/Decisions Made for this project
+1. Same event of a source for different tenant will be treated as a different event
+2. There can be updates in an event (eg. Review) so we will update the event in DB and will not ignore it.
+3. For this project I am using my own models assuming that *Twitter* and *ReviewsAPI* will not break their SLA with an update
+
 ## Content
 
 1. Why do we need 3 stages?
@@ -109,7 +114,7 @@ Producers(Event Pullers/Event Pushers) can push the raw feedback events to this 
 1. Parses input raw feedback events and converts them into processed ***Feedback Events***.
 2. Raw feedback event contains the data in API response format. This lambda converts it to a uniform structure to store for all sources.
 3. Contains parsing logic for each source. Parses the event based on the source field present in the raw event.
-4. Finally publishes every event to DynamoDBWriteQueue
+4. Finally, publishes every event to DynamoDBWriteQueue
 
 ## Event Storage
 

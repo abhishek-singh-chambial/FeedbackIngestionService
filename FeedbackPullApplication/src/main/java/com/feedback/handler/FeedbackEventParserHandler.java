@@ -7,7 +7,7 @@ import com.feedback.model.FeedbackEvent;
 import com.feedback.model.RawFeedbackEvent;
 import com.feedback.utils.DependencyFactory;
 import com.feedback.utils.SQSUtil;
-import com.feedback.utils.parse.Parser;
+import com.feedback.parse.Parser;
 import lombok.extern.log4j.Log4j2;
 
 import java.util.*;

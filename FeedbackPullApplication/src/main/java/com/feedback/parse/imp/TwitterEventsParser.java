@@ -1,4 +1,4 @@
-package com.feedback.utils.parse.imp;
+package com.feedback.parse.imp;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -10,7 +10,7 @@ import com.feedback.model.RawFeedbackEvent;
 import com.feedback.model.twitter.EventData;
 import com.feedback.model.twitter.Place;
 import com.feedback.model.twitter.Tweet;
-import com.feedback.utils.parse.Parser;
+import com.feedback.parse.Parser;
 
 import java.util.HashMap;
 import java.util.List;
