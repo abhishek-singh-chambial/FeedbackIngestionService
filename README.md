@@ -1,126 +1,143 @@
-# FeedbackIngestionService
+# Feedback Ingestion Pipeline
 
-This project contains source code and supporting files for a serverless application that you can deploy with the SAM CLI. It includes the following files and folders.
+## Current Design
+![Design](image/FeedbackIngestionPipelineDesign.png?raw=true "Feedback Ingestion Pipeline Design")
 
-- HelloWorldFunction/src/main - Code for the application's Lambda function.
-- events - Invocation events that you can use to invoke the function.
-- HelloWorldFunction/src/test - Unit tests for the application code. 
-- template.yaml - A template that defines the application's AWS resources.
+## Content
 
-The application uses several AWS resources, including Lambda functions and an API Gateway API. These resources are defined in the `template.yaml` file in this project. You can update the template to add AWS resources through the same deployment process that updates your application code.
+1. Why do we need 3 stages?
+2. Steps to add a new Source
+3. Steps to add a new Tenant for a source
+4. Event Generation
+    1. Scheduled Events (EventBridge)
+    2. Event Search Lambdas
+        1. TwitterEventSearch Lambda
+        2. TripAdvisorEventSearch Lambda
+5. Event Parsing
+    1. Lambda Triggering Queue
+    2. Lambda to parse raw feedback events
+6. Event Storage
+    1. Lambda Triggering Queue
+    2. DynamoDB Table to store feedback data
+    3. Lambda to write event to DynamoDB table
+7. Dead letter Queues
 
-If you prefer to use an integrated development environment (IDE) to build and test your application, you can use the AWS Toolkit.  
-The AWS Toolkit is an open source plug-in for popular IDEs that uses the SAM CLI to build and deploy serverless applications on AWS. The AWS Toolkit also adds a simplified step-through debugging experience for Lambda function code. See the following links to get started.
+## Why do we need 3 stages?
 
-* [CLion](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [GoLand](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [IntelliJ](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [WebStorm](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [Rider](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [PhpStorm](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [PyCharm](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [RubyMine](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [DataGrip](https://docs.aws.amazon.com/toolkit-for-jetbrains/latest/userguide/welcome.html)
-* [VS Code](https://docs.aws.amazon.com/toolkit-for-vscode/latest/userguide/welcome.html)
-* [Visual Studio](https://docs.aws.amazon.com/toolkit-for-visual-studio/latest/user-guide/welcome.html)
+Although we can do every step in a single lambda, It will become a bottleneck when parsing and writing to DB when the query output is huge.
 
-## Deploy the sample application
+To overcome this we can have source search lambdas to only make API calls and publish events for parsing.
 
-The Serverless Application Model Command Line Interface (SAM CLI) is an extension of the AWS CLI that adds functionality for building and testing Lambda applications. It uses Docker to run your functions in an Amazon Linux environment that matches Lambda. It can also emulate your application's build environment and API.
+Similarly, Writing to DB will become a bottleneck for parsing. We have only a limited number of write capacity units and if we cross that threshold, DynamoDB will throttle and start throwing errors.
 
-To use the SAM CLI, you need the following tools.
+We can overcome this by having separate lambdas from parsing and DynamoDB writes. And we can limit the DynamoDB write lambda’s concurrent executions which will ensure that our DB never gets throttled.
 
-* SAM CLI - [Install the SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
-* Java8 - [Install the Java SE Development Kit 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
-* Docker - [Install Docker community edition](https://hub.docker.com/search/?type=edition&offering=community)
+## Steps to add a new Source
 
-To build and deploy your application for the first time, run the following in your shell:
+### 1.  Add a new pull source:
 
-```bash
-sam build
-sam deploy --guided
+1. Cloudformation Template changes to create a new lambda in the application stack
+2. Event handler and service calls for a new source
+3. Event parsing logic for a new source response
+
+### 2.  Add a new Push source:
+
+1. Push source can directly publish events to EventParserQueue in RawFeedbackEvent format.
+2. Else a new lambda can be added as a buffer to convert push events to raw feedback events and then that lambda can publish events to EventParserQueue
+
+## Steps to add a new Tenant for a pull source
+
+1. Create a scheduled event with required details and Done. Refer Scheduled event section for more details.
+
+## Event Generation
+
+### Scheduled Events
+
+Works as a trigger to invoke pull functionality lambdas. This will be used for new tenant onboarding to a Source.
+
+Event properties:
+
+1. Schedule rate: Rate at which lambda will be triggered for a tenant query
+2. Input: Input to the lambda. This will contain the required data for lambda functioning. Like tenant info, query, time range
+3. Lambda Trigger: This will invoke the target lambda
+
+Sample Input for Twitter:
+
+```
+{
+  "time": "2022-02-20T12:00:00Z",
+  "detail": {
+    "query": "Tesla -is:retweet", //Query for searching 
+    "tenant": "Tesla",
+    "slotLength": 30
+  }
+}
 ```
 
-The first command will build the source of your application. The second command will package and deploy your application to AWS, with a series of prompts:
+This will invoke TwitterEventSearch lambda with for tenant “Tesla” with input query from “2022-02-20 11:30:00” to “2022-02-20 12:00:00” GMT
 
-* **Stack Name**: The name of the stack to deploy to CloudFormation. This should be unique to your account and region, and a good starting point would be something matching your project name.
-* **AWS Region**: The AWS region you want to deploy your app to.
-* **Confirm changes before deploy**: If set to yes, any change sets will be shown to you before execution for manual review. If set to no, the AWS SAM CLI will automatically deploy application changes.
-* **Allow SAM CLI IAM role creation**: Many AWS SAM templates, including this example, create AWS IAM roles required for the AWS Lambda function(s) included to access AWS services. By default, these are scoped down to minimum required permissions. To deploy an AWS CloudFormation stack which creates or modifies IAM roles, the `CAPABILITY_IAM` value for `capabilities` must be provided. If permission isn't provided through this prompt, to deploy this example you must explicitly pass `--capabilities CAPABILITY_IAM` to the `sam deploy` command.
-* **Save arguments to samconfig.toml**: If set to yes, your choices will be saved to a configuration file inside the project, so that in the future you can just re-run `sam deploy` without parameters to deploy changes to your application.
 
-You can find your API Gateway Endpoint URL in the output values displayed after deployment.
+### Event Search Lambdas
 
-## Use the SAM CLI to build and test locally
+Functions for individual sources. Each source will have its own Lambda. These lambdas will act as pullers for their respective sources.
 
-Build your application with the `sam build` command.
+**Input**: Scheduled event
+**Output**: Raw feedback event containing source info, tenant info, and Source API response
+**Failure**:  Event Lands to Search Event DQL
 
-```bash
-FeedbackIngestionService$ sam build
-```
+#### 1. TwitterEventSearch Lambda
 
-The SAM CLI installs dependencies defined in `HelloWorldFunction/build.gradle`, creates a deployment package, and saves it in the `.aws-sam/build` folder.
+* Queries Twitter’s /2/*tweets/*search/recent API
+* Can query for a specific time slot
+* If receives a non-empty response, writes to Parser queue. The single response can contain multiple events.
 
-Test a single function by invoking it directly with a test event. An event is a JSON document that represents the input that the function receives from the event source. Test events are included in the `events` folder in this project.
+#### 2. TripAdvisorEventSearch Lambda
 
-Run functions locally and invoke them with the `sam local invoke` command.
+* Queries reviewsApi /2/*tweets/*search/recent API
+* Only has support for searching from a date
+* If receives a non-empty response, writes to Parser queue
 
-```bash
-FeedbackIngestionService$ sam local invoke HelloWorldFunction --event events/event.json
-```
+## Event Parsing
 
-The SAM CLI can also emulate your application's API. Use the `sam local start-api` to run the API locally on port 3000.
+### Lambda Triggering Queue/EventParserQueue
 
-```bash
-FeedbackIngestionService$ sam local start-api
-FeedbackIngestionService$ curl http://localhost:3000/
-```
+This queue gets messages from the pull source and also provides push mechanisms for push-based events.
+Producers(Event Pullers/Event Pushers) can push the raw feedback events to this queue. This queue triggers the FeedbackEventParser Lambda
 
-The SAM CLI reads the application template to determine the API's routes and the functions that they invoke. The `Events` property on each function's definition includes the route and method for each path.
+### Lambda/FeedbackEventParser
 
-```yaml
-      Events:
-        HelloWorld:
-          Type: Api
-          Properties:
-            Path: /hello
-            Method: get
-```
+1. Parses input raw feedback events and converts them into processed ***Feedback Events***.
+2. Raw feedback event contains the data in API response format. This lambda converts it to a uniform structure to store for all sources.
+3. Contains parsing logic for each source. Parses the event based on the source field present in the raw event.
+4. Finally publishes every event to DynamoDBWriteQueue
 
-## Add a resource to your application
-The application template uses AWS Serverless Application Model (AWS SAM) to define application resources. AWS SAM is an extension of AWS CloudFormation with a simpler syntax for configuring common serverless application resources such as functions, triggers, and APIs. For resources not included in [the SAM specification](https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md), you can use standard [AWS CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-template-resource-type-ref.html) resource types.
+## Event Storage
 
-## Fetch, tail, and filter Lambda function logs
+### Lambda Triggering Queue/DynamoDBWriteQueue
 
-To simplify troubleshooting, SAM CLI has a command called `sam logs`. `sam logs` lets you fetch logs generated by your deployed Lambda function from the command line. In addition to printing the logs on the terminal, this command has several nifty features to help you quickly find the bug.
+This queue gets messages from the FeedbackEventParser lambda. This queue triggers the SaveFeedback Lambda
 
-`NOTE`: This command works for all AWS Lambda functions; not just the ones you deploy using SAM.
+### Lambda/SaveFeedback
 
-```bash
-FeedbackIngestionService$ sam logs -n HelloWorldFunction --stack-name FeedbackIngestionService --tail
-```
+1. Converts SQS Event to DynamoDB Mapper object (FeedbackEvent in this case as using the same POJO for both lambdas)
+2. Writes the event to DynamoDB Table “Feedback-Table
 
-You can find more information and examples about filtering Lambda function logs in the [SAM CLI Documentation](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-logging.html).
+### Storage/Feedback-Table
 
-## Unit tests
+DynamoDB is used as storage due to its high scalability, fault tolerance, and availability
 
-Tests are defined in the `HelloWorldFunction/src/test` folder in this project.
+**Partition key: generator**
+It is the combination of source and tenant as SOURCE_TENANT. This will ensure that all the events from a source for a tenant will be stored in the same partition reducing the search overhead.
 
-```bash
-FeedbackIngestionService$ cd HelloWorldFunction
-HelloWorldFunction$ gradle test
-```
+**Range/Sort Key: id**
+This is the unique id for an event at the source.
 
-## Cleanup
+*Together both of them make a **primary key** that will make an event **idempotent**. Here we are assuming that **each event will correspond to a tenant**. If the **same event comes for another tenan**t, we will treat it as a **new event**.*
 
-To delete the sample application that you created, use the AWS CLI. Assuming you used your project name for the stack name, you can run the following:
+## **Dead Letter Queues**
 
-```bash
-aws cloudformation delete-stack --stack-name FeedbackIngestionService
-```
+## **Dead Letter Queues**
 
-## Resources
+A dead letter queue is required to store all failed events which can be used to rerun the message,  create alarms and debug through CloudWatch logs.
 
-See the [AWS SAM developer guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html) for an introduction to SAM specification, the SAM CLI, and serverless application concepts.
 
-Next, you can use AWS Serverless Application Repository to deploy ready to use Apps that go beyond hello world samples and learn how authors developed their applications: [AWS Serverless Application Repository main page](https://aws.amazon.com/serverless/serverlessrepo/)
