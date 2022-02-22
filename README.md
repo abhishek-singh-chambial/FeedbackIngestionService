@@ -7,6 +7,7 @@
 1. Same event of a source for different tenant will be treated as a different event
 2. There can be updates in an event (eg. Review) so we will update the event in DB and will not ignore it.
 3. For this project I am using my own models assuming that *Twitter* and *ReviewsAPI* will not break their SLA with an update
+4. Currently, *Scheduled events* can only be created from the console only. This can be extended to use API Gateway and cloudformation to automate this by providing a API.
 
 ## Content
 
